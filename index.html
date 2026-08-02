@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audit Checker · v0.3</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f172a; color: #e2e8f0; min-height: 100vh;
+  }
+  header {
+    padding: 12px 14px; background: #1e293b; border-bottom: 1px solid #334155;
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header .sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+  main { padding: 10px; padding-bottom: 60px; max-width: 900px; margin: 0 auto; }
+
+  .uploads { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .upBtn {
+    background: #1e293b; border: 1.5px dashed #475569; border-radius: 10px;
+    padding: 14px 10px; text-align: center; cursor: pointer; transition: all .15s;
+  }
+  .upBtn:hover, .upBtn.hover { border-color: #60a5fa; background: #1e3a5f; }
+  .upBtn.loaded { border-color: #4ade80; border-style: solid; background: #052e16; }
+  .upBtn .ic { font-size: 22px; margin-bottom: 4px; }
+  .upBtn .ttl { font-size: 12px; font-weight: 600; color: #e2e8f0; }
+  .upBtn .sub { font-size: 10px; color: #94a3b8; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .upBtn input { display: none; }
+
+  .controls {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;
+  }
+  .ctrl {
+    background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+    padding: 6px 10px; font-size: 12px; color: #cbd5e1;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .ctrl select {
+    background: transparent; color: #e2e8f0; border: 1px solid #475569;
+    padding: 3px 6px; border-radius: 5px; font-size: 12px; font-family: inherit;
+  }
+  .shiftBtn {
+    background: #3b82f6; color: white; border: none; border-radius: 8px;
+    padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .shiftBtn.a { background: #a855f7; }
+
+  .tlBox {
+    background: linear-gradient(135deg, #422006 0%, #1e293b 100%);
+    border: 1px solid #a16207; border-radius: 10px; padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .tlBox .lbl { font-size: 10px; color: #fbbf24; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .tlBox .name { font-size: 16px; color: #f1f5f9; font-weight: 600; margin-top: 2px; }
+  .tlBox .stats { font-size: 12px; color: #cbd5e1; margin-top: 4px; }
+  .tlBox .changeBar { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .tlBox select {
+    flex: 1; min-width: 0; background: #0f172a; color: #e2e8f0; border: 1px solid #475569;
+    border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: inherit;
+  }
+  .tlBox .btn {
+    background: #f59e0b; color: #0f172a; border: none; padding: 5px 12px;
+    border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .tlBox .btn.secondary { background: #334155; color: #cbd5e1; }
+  .tlBox.none { border-color: #475569; background: #1e293b; }
+  .tlBox.none .lbl { color: #94a3b8; }
+  .tlBox.none .name { color: #64748b; font-size: 13px; font-weight: 400; }
+
+  .rooms { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .roomCard {
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .roomCard.fp1 { border-left: 4px solid #3b82f6; }
+  .roomCard.fp2 { border-left: 4px solid #10b981; }
+  .roomCard.kfc { border-left: 4px solid #ef4444; }
+  .roomCard.hw  { border-left: 4px solid #eab308; }
+  .roomCard h3 {
+    margin: 0 0 6px 0; font-size: 12px; font-weight: 600; color: #f1f5f9;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .roomCard h3 .tot { font-size: 17px; color: #60a5fa; font-variant-numeric: tabular-nums; }
+  .roomCard.fp2 h3 .tot { color: #4ade80; }
+  .roomCard.kfc h3 .tot { color: #f87171; }
+  .roomCard.hw  h3 .tot { color: #facc15; }
+  .metric {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 3px 0; font-size: 12px;
+  }
+  .metric .lbl { color: #cbd5e1; }
+  .metric .val { color: #f1f5f9; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #94a3b8;
+    margin: 16px 4px 6px 4px; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  h2 .action {
+    background: #1e293b; border: 1px solid #334155; color: #cbd5e1;
+    padding: 3px 10px; font-size: 10px; border-radius: 5px; cursor: pointer;
+    text-transform: none; letter-spacing: 0; font-weight: 500; font-family: inherit;
+  }
+
+  .tableWrap {
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    overflow: auto; -webkit-overflow-scrolling: touch;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td {
+    padding: 7px 8px; text-align: right; border-bottom: 1px solid #253349;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  th {
+    background: #0f172a; color: #94a3b8; font-weight: 500; font-size: 10px;
+    text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0;
+  }
+  th.name, td.name {
+    text-align: left; position: sticky; left: 0; background: #1e293b;
+    z-index: 1; font-weight: 500; color: #e2e8f0;
+    border-right: 1px solid #334155; min-width: 140px;
+    max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+  }
+  th.name { background: #0f172a; z-index: 2; }
+  td.zero { color: #475569; }
+  td.hi { color: #60a5fa; font-weight: 600; }
+
+  /* Row color for individual performance based on primary room */
+  tr.fp1 td.name { background: #172554; border-left: 3px solid #3b82f6; padding-left: 8px; }
+  tr.fp1:hover td.name { background: #1e3a8a; }
+  tr.fp2 td.name { background: #052e16; border-left: 3px solid #10b981; padding-left: 8px; }
+  tr.fp2:hover td.name { background: #064e3b; }
+  tr.mixed td.name { background: #422006; border-left: 3px solid #f59e0b; padding-left: 8px; }
+
+  tr.total td { background: #0f172a; font-weight: 600; color: #f1f5f9; border-top: 2px solid #334155; }
+  tr.total td.name { background: #0f172a; border-left: none; padding-left: 8px; }
+
+  .marker { display: inline-block; margin-left: 4px; font-size: 12px; }
+
+  /* Customer table - expandable */
+  tr.cust td.name { cursor: pointer; user-select: none; }
+  tr.cust td.name::before {
+    content: "▸"; display: inline-block; width: 12px; color: #64748b;
+    transition: transform .15s;
+  }
+  tr.cust.open td.name::before { transform: rotate(90deg); }
+  tr.prod { display: none; background: #0f172a; }
+  tr.prod.show { display: table-row; }
+  tr.prod td { color: #94a3b8; font-size: 11px; }
+  tr.prod td.name { padding-left: 24px; background: #0f172a; font-weight: 400;
+    color: #cbd5e1; border-left: none; }
+
+  .flag {
+    background: #422006; color: #fbbf24; padding: 8px 12px; border-radius: 8px;
+    font-size: 11px; margin: 8px 0; border: 1px solid #78350f;
+  }
+  .empty { text-align: center; padding: 30px 20px; color: #64748b; font-size: 13px; }
+  .hidden { display: none !important; }
+  .err { background: #7f1d1d; color: #fecaca; padding: 10px; border-radius: 8px;
+    font-size: 12px; margin-bottom: 10px; }
+
+  @media (max-width: 480px) {
+    .rooms { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Audit Checker</h1>
+  <div class="sub">v0.3 · rooms · team leader · individual · customer</div>
+</header>
+
+<main>
+  <div class="uploads">
+    <label class="upBtn" id="fpBtn">
+      <div class="ic">📥</div>
+      <div class="ttl">Upload Fresh Pack</div>
+      <div class="sub" id="fpSub">FP1 + FP2 export</div>
+      <input type="file" accept=".xlsx,.xlsm" id="fpInput">
+    </label>
+    <label class="upBtn" id="kfcBtn">
+      <div class="ic">📥</div>
+      <div class="ttl">Upload KFC</div>
+      <div class="sub" id="kfcSub">KFC + Hot Wings</div>
+      <input type="file" accept=".xlsx,.xlsm" id="kfcInput">
+    </label>
+  </div>
+
+  <div id="errBox"></div>
+
+  <div id="content" class="hidden">
+    <div class="controls">
+      <div class="ctrl" id="dateCtrl">
+        📅 <select id="dateSel"></select>
+      </div>
+      <button class="shiftBtn" id="shiftBtn">Shift B</button>
+      <div class="ctrl" id="rowCount"></div>
+    </div>
+
+    <div id="tlBox" class="tlBox"></div>
+
+    <div id="flagBox"></div>
+
+    <div class="rooms">
+      <div class="roomCard fp1">
+        <h3>Fresh Pack 1 <span class="tot" id="fp1Tot">0</span></h3>
+        <div class="metric"><span class="lbl">QAS</span><span class="val" id="fp1Qas">0</span></div>
+        <div class="metric"><span class="lbl">Catchweight</span><span class="val" id="fp1Cw">0</span></div>
+      </div>
+      <div class="roomCard fp2">
+        <h3>Fresh Pack 2 <span class="tot" id="fp2Tot">0</span></h3>
+        <div class="metric"><span class="lbl">QAS</span><span class="val" id="fp2Qas">0</span></div>
+        <div class="metric"><span class="lbl">Injection</span><span class="val" id="fp2Inj">0</span></div>
+        <div class="metric"><span class="lbl">Compliance</span><span class="val" id="fp2Cmp">0</span></div>
+      </div>
+      <div class="roomCard kfc">
+        <h3>KFC <span class="tot" id="kfcTot">0</span></h3>
+        <div class="metric"><span class="lbl">RAG (9pc + Dark Meat)</span><span class="val" id="kfcRag">0</span></div>
+      </div>
+      <div class="roomCard hw">
+        <h3>Hot Wings <span class="tot" id="hwTot">0</span></h3>
+        <div class="metric"><span class="lbl">RAG</span><span class="val" id="hwRag">0</span></div>
+      </div>
+    </div>
+
+    <h2>Individual Performance <span id="perfLegend" style="font-size:10px; color:#64748b; text-transform:none; letter-spacing:0; font-weight:400;">⭐ top total · 🍀 balanced+high</span></h2>
+    <div class="tableWrap" id="qaTable"></div>
+
+    <h2>By Customer <button class="action" id="expandAllBtn">Expand all</button></h2>
+    <div class="tableWrap" id="custTable"></div>
+  </div>
+
+  <div id="empty" class="empty">Upload files to begin. Fresh Pack file for FP1/FP2 data, KFC file for RAG.</div>
+</main>
+
+<script>
+// ================= CONFIG =================
+const FP2_KEYWORDS = [
+  "extra tasty", "pso", "spatchcock", "rotisserie",
+  "garlic and herb", "garlic & herb", "salt and pepper", "s&p",
+  "bbq", "hot honey", "butter basted", "piri piri", "chinese",
+  "lemon and herb", "smoky", "sweet smokey", "deli", "chilli",
+  "sriracha", "jerk", "cajun"
+];
+
+// ================= STATE =================
+let rows = [];
+let manualTL = null;
+let currentShift = "B";
+let currentDate = null;
+let expandedCustomers = new Set();
+let allExpanded = false;
+
+// ================= UTILS =================
+function normName(v) {
+  if (v == null) return "";
+  return String(v).replace(/\s+/g, " ").trim().toLowerCase()
+    .replace(/(^|\s)\S/g, t => t.toUpperCase());
+}
+function normShift(v) {
+  if (v == null) return "";
+  const s = String(v).trim().toUpperCase();
+  if (s.startsWith("A")) return "A";
+  if (s.startsWith("B")) return "B";
+  return s;
+}
+function normCustomer(v) {
+  if (v == null) return "";
+  let s = String(v).trim();
+  const low = s.toLowerCase();
+  if (low === "m&s" || low === "m and s" || low === "marks and spencer" ||
+      low === "marks & spencer" || low === "ms") return "M&S";
+  if (low === "coop" || low === "co-op" || low === "co op") return "Co-op";
+  if (low === "kfc") return "KFC";
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+function findCol(headers, ...cands) {
+  const norm = headers.map(h => String(h || "").trim().toLowerCase().replace(/:$/, ""));
+  for (const c of cands) {
+    const t = c.trim().toLowerCase().replace(/:$/, "");
+    const i = norm.indexOf(t);
+    if (i !== -1) return i;
+  }
+  return -1;
+}
+function toISODate(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const d = new Date(v);
+  if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  return null;
+}
+function fmtDate(iso) {
+  if (!iso || iso === "ALL") return iso;
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+function isAldi(product, customer) {
+  return /aldi/i.test((customer || "") + " " + (product || ""));
+}
+
+// ================= PRODUCT → ROOM =================
+function classifyProduct(text) {
+  const p = (text || "").toLowerCase();
+  if (!p) return null;
+  for (const kw of FP2_KEYWORDS) if (p.includes(kw)) return "FP2";
+  return "FP1";
+}
+
+// ================= ROW CLASSIFICATION =================
+function classify(row) {
+  const q = (row.qtype || "").toLowerCase();
+  const area = (row.area || "").toUpperCase();
+  const text = (row.customer || "") + " " + (row.product || "");
+
+  // Hot Wings first (before KFC, since sheet names contain "KFC Hot Wings")
+  if (q.includes("hot wings")) return { room: "HW", type: "RAG" };
+
+  // KFC RAG (9 Piece, Dark Meat)
+  if (q.includes("kfc") || q.includes("dark meat") ||
+      q.includes("9 piece") || q.includes(" rag ") || q.endsWith(" rag") ||
+      q.includes("rag ")) {
+    return { room: "KFC", type: "RAG" };
+  }
+
+  // Injection → FP2
+  if (q.includes("injection")) return { room: "FP2", type: "Injection" };
+
+  // QAS Session
+  if (q.includes("qas session") || q === "qas") {
+    let room = area === "FP1" ? "FP1" : area === "FP2" ? "FP2" : classifyProduct(text);
+    return { room: room || "Unassigned", type: "QAS" };
+  }
+
+  // Compliance audits
+  if (q.includes("catchweight")) return { room: "FP1", type: "Compliance (CW)" };
+  if (q.includes("average weight")) return { room: "FP2", type: "Compliance (Avg)" };
+  if (q.includes("compliance")) {
+    let room = area === "FP1" ? "FP1" : area === "FP2" ? "FP2" : classifyProduct(text);
+    return { room: room || "Unassigned", type: "Compliance" };
+  }
+
+  return { room: "Unassigned", type: "Other" };
+}
+
+// ================= TEAM LEADER =================
+function detectTeamLeader(dayRows) {
+  const byQA = {};
+  for (const r of dayRows) {
+    if (!r.qa) continue;
+    (byQA[r.qa] = byQA[r.qa] || []).push(r);
+  }
+  const candidates = [];
+  for (const qa in byQA) {
+    const audits = byQA[qa];
+    const fp1QAS = audits.filter(a => a.roomCat === "FP1" && a.typeCat === "QAS").length;
+    const fp2QAS = audits.filter(a => a.roomCat === "FP2" && a.typeCat === "QAS").length;
+    const nonQAS = audits.filter(a => a.typeCat !== "QAS").length;
+    if (fp1QAS === 2 && fp2QAS === 2 && nonQAS === 0) {
+      const fp1Aldi = audits.some(a => a.roomCat === "FP1" && isAldi(a.product, a.customer));
+      const fp2Aldi = audits.some(a => a.roomCat === "FP2" && isAldi(a.product, a.customer));
+      candidates.push({ qa, aldiBonus: (fp1Aldi?1:0) + (fp2Aldi?1:0) });
+    }
+  }
+  candidates.sort((a, b) => b.aldiBonus - a.aldiBonus);
+  return candidates;
+}
+
+// ================= FILE HANDLING =================
+function bindUpload(btnId, inputId, subId, tag) {
+  const btn = document.getElementById(btnId);
+  const input = document.getElementById(inputId);
+  const sub = document.getElementById(subId);
+  input.addEventListener("change", async e => {
+    const f = e.target.files[0]; if (!f) return;
+    await loadFile(f, tag);
+    btn.classList.add("loaded");
+    sub.textContent = f.name;
+    render();
+  });
+  ["dragover", "dragenter"].forEach(ev =>
+    btn.addEventListener(ev, e => { e.preventDefault(); btn.classList.add("hover"); }));
+  ["dragleave", "drop"].forEach(ev =>
+    btn.addEventListener(ev, e => { e.preventDefault(); btn.classList.remove("hover"); }));
+  btn.addEventListener("drop", async e => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0]; if (!f) return;
+    await loadFile(f, tag);
+    btn.classList.add("loaded");
+    sub.textContent = f.name;
+    render();
+  });
+}
+bindUpload("fpBtn", "fpInput", "fpSub", "fp");
+bindUpload("kfcBtn", "kfcInput", "kfcSub", "kfc");
+
+async function loadFile(f, tag) {
+  const errBox = document.getElementById("errBox");
+  try {
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array", cellDates: true });
+    rows = rows.filter(r => r.uploadTag !== tag);
+    parseWorkbook(wb, f.name, tag);
+  } catch (e) {
+    errBox.innerHTML += `<div class="err">Failed to read ${f.name}: ${e.message}</div>`;
+  }
+}
+
+function parseWorkbook(wb, fname, tag) {
+  for (const sn of wb.SheetNames) {
+    const ws = wb.Sheets[sn];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+    if (!data.length) continue;
+    const headers = data[0].map(h => h == null ? "" : String(h));
+    const idx = {
+      ref: findCol(headers, "Ref"),
+      qtype: findCol(headers, "Questionnaire Type"),
+      location: findCol(headers, "Location"),
+      auditor: findCol(headers, "Auditor"),
+      qa: findCol(headers, "QA Name", "QA Name:", "Name", "Name:"),
+      shift: findCol(headers, "Shift", "Shift:"),
+      area: findCol(headers, "Area"),
+      line: findCol(headers, "Line Number", "Line", "Line:"),
+      customer: findCol(headers, "Customer"),
+      product: findCol(headers, "Product", "Retail Product Type", "Product:"),
+      submitDate: findCol(headers, "Date"),
+      checkDate: findCol(headers, "Date.1", "Date:", "Date "),
+    };
+    for (let r = 1; r < data.length; r++) {
+      const row = data[r];
+      if (!row || row.every(c => c == null || c === "")) continue;
+      const ref = idx.ref >= 0 ? row[idx.ref] : null;
+      if (!ref) continue;
+      const g = k => idx[k] >= 0 ? row[idx[k]] : null;
+      const dateVal = g("checkDate") || g("submitDate");
+      rows.push({
+        ref: String(ref),
+        qtype: g("qtype") || "",
+        location: g("location") || "",
+        area: g("area") || "",
+        line: g("line"),
+        shift: normShift(g("shift")),
+        auditor: g("auditor") || "",
+        qa: normName(g("qa")),
+        customer: normCustomer(g("customer")),
+        product: String(g("product") || "").trim(),
+        date: toISODate(dateVal),
+        srcSheet: sn,
+        uploadTag: tag,
+      });
+    }
+  }
+}
+
+// ================= FILTERS =================
+function filteredRows() {
+  return rows.filter(r => {
+    if (currentShift && r.shift !== currentShift) return false;
+    if (currentDate && currentDate !== "ALL" && r.date !== currentDate) return false;
+    return true;
+  });
+}
+
+// ================= RENDER =================
+function render() {
+  if (!rows.length) return;
+  document.getElementById("empty").classList.add("hidden");
+  document.getElementById("content").classList.remove("hidden");
+
+  rows.forEach(r => {
+    const c = classify(r);
+    r.roomCat = c.room;
+    r.typeCat = c.type;
+  });
+
+  const dateSel = document.getElementById("dateSel");
+  const dates = [...new Set(rows.map(r => r.date).filter(Boolean))].sort().reverse();
+  if (dates.length > 1) {
+    dateSel.innerHTML = dates.map(d =>
+      `<option value="${d}">${fmtDate(d)}</option>`).join("") +
+      `<option value="ALL">All dates</option>`;
+    if (!currentDate || (!dates.includes(currentDate) && currentDate !== "ALL")) currentDate = dates[0];
+    dateSel.value = currentDate;
+    document.getElementById("dateCtrl").classList.remove("hidden");
+  } else if (dates.length === 1) {
+    currentDate = dates[0];
+    dateSel.innerHTML = `<option value="${dates[0]}">${fmtDate(dates[0])}</option>`;
+    dateSel.value = dates[0];
+  } else {
+    document.getElementById("dateCtrl").classList.add("hidden");
+  }
+
+  const shiftBtn = document.getElementById("shiftBtn");
+  shiftBtn.textContent = "Shift " + currentShift;
+  shiftBtn.classList.toggle("a", currentShift === "A");
+
+  renderView();
+}
+
+function renderView() {
+  const view = filteredRows();
+  document.getElementById("rowCount").textContent = view.length + " rows";
+
+  const candidates = detectTeamLeader(view);
+  let tl = null;
+  if (manualTL && view.some(r => r.qa === manualTL)) tl = manualTL;
+  if (!tl && candidates.length) tl = candidates[0].qa;
+  renderTL(tl, candidates, view);
+
+  const nonTL = tl ? view.filter(r => r.qa !== tl) : view;
+
+  // Room metrics
+  const fp1Qas = nonTL.filter(r => r.roomCat === "FP1" && r.typeCat === "QAS").length;
+  const fp1Cw  = nonTL.filter(r => r.roomCat === "FP1" && r.typeCat === "Compliance (CW)").length;
+  const fp2Qas = nonTL.filter(r => r.roomCat === "FP2" && r.typeCat === "QAS").length;
+  const fp2Inj = nonTL.filter(r => r.roomCat === "FP2" && r.typeCat === "Injection").length;
+  const fp2Cmp = nonTL.filter(r => r.roomCat === "FP2" &&
+    (r.typeCat === "Compliance (Avg)" || r.typeCat === "Compliance")).length;
+  const kfcRag = nonTL.filter(r => r.roomCat === "KFC").length;
+  const hwRag  = nonTL.filter(r => r.roomCat === "HW").length;
+
+  document.getElementById("fp1Qas").textContent = fp1Qas;
+  document.getElementById("fp1Cw").textContent = fp1Cw;
+  document.getElementById("fp1Tot").textContent = fp1Qas + fp1Cw;
+  document.getElementById("fp2Qas").textContent = fp2Qas;
+  document.getElementById("fp2Inj").textContent = fp2Inj;
+  document.getElementById("fp2Cmp").textContent = fp2Cmp;
+  document.getElementById("fp2Tot").textContent = fp2Qas + fp2Inj + fp2Cmp;
+  document.getElementById("kfcRag").textContent = kfcRag;
+  document.getElementById("kfcTot").textContent = kfcRag;
+  document.getElementById("hwRag").textContent = hwRag;
+  document.getElementById("hwTot").textContent = hwRag;
+
+  renderQATable(nonTL, tl);
+  renderCustTable(nonTL);
+  renderFlags(view);
+}
+
+function renderTL(tl, candidates, view) {
+  const box = document.getElementById("tlBox");
+  const allQAs = [...new Set(view.map(r => r.qa).filter(Boolean))].sort();
+  const selOpts = allQAs.map(q => `<option value="${escapeHtml(q)}" ${q===tl?"selected":""}>${escapeHtml(q)}</option>`).join("");
+
+  if (tl) {
+    const tlRows = view.filter(r => r.qa === tl);
+    const fp1n = tlRows.filter(r => r.roomCat === "FP1").length;
+    const fp2n = tlRows.filter(r => r.roomCat === "FP2").length;
+    const other = tlRows.filter(r => r.roomCat !== "FP1" && r.roomCat !== "FP2").length;
+    const aldiFP1 = tlRows.some(r => r.roomCat === "FP1" && isAldi(r.product, r.customer));
+    const aldiFP2 = tlRows.some(r => r.roomCat === "FP2" && isAldi(r.product, r.customer));
+    const aldiTag = (aldiFP1 && aldiFP2) ? "· ✓ Aldi both rooms"
+      : (aldiFP1 || aldiFP2) ? "· ⚠ Aldi in one room only" : "· ✗ no Aldi";
+    const tag = manualTL === tl ? "manual"
+      : candidates[0] && candidates[0].qa === tl ? "auto-detected" : "override";
+
+    box.classList.remove("none");
+    box.innerHTML = `
+      <div class="lbl">Team Leader · ${tag}</div>
+      <div class="name">${escapeHtml(tl)}</div>
+      <div class="stats">FP1: ${fp1n} · FP2: ${fp2n}${other?` · Other: ${other}`:""} ${aldiTag}</div>
+      <div class="changeBar">
+        <select id="tlSel">${selOpts}</select>
+        <button class="btn" id="tlSet">Set</button>
+        ${manualTL ? '<button class="btn secondary" id="tlClear">Auto</button>' : ''}
+      </div>`;
+  } else {
+    box.classList.add("none");
+    box.innerHTML = `
+      <div class="lbl">Team Leader · not detected</div>
+      <div class="name">No one matches 2 FP1 QAS + 2 FP2 QAS + no others</div>
+      <div class="changeBar">
+        <select id="tlSel"><option value="">-- pick manually --</option>${selOpts}</select>
+        <button class="btn" id="tlSet">Set</button>
+      </div>`;
+  }
+  document.getElementById("tlSet").onclick = () => {
+    const val = document.getElementById("tlSel").value;
+    manualTL = val || null;
+    renderView();
+  };
+  const clr = document.getElementById("tlClear");
+  if (clr) clr.onclick = () => { manualTL = null; renderView(); };
+}
+
+function renderQATable(nonTL, tlName) {
+  const wrap = document.getElementById("qaTable");
+  const byQA = {};
+
+  // Only include rows where the person did FP1 or FP2 work
+  // (KFC/HW-only QAs are excluded per spec)
+  for (const r of nonTL) {
+    if (!r.qa) continue;
+    if (r.roomCat !== "FP1" && r.roomCat !== "FP2") continue;
+    const q = byQA[r.qa] = byQA[r.qa] || {
+      qas: 0, inj: 0, cmp: 0, fp1: 0, fp2: 0
+    };
+    if (r.typeCat === "QAS") q.qas++;
+    else if (r.typeCat === "Injection") q.inj++;
+    else q.cmp++;  // Compliance (CW), Compliance (Avg), Compliance
+    if (r.roomCat === "FP1") q.fp1++;
+    else if (r.roomCat === "FP2") q.fp2++;
+  }
+  const list = Object.entries(byQA).map(([qa, c]) => ({
+    qa, ...c,
+    tot: c.qas + c.inj + c.cmp,
+    primary: c.fp1 > c.fp2 ? "fp1" : c.fp2 > c.fp1 ? "fp2" : "mixed"
+  })).sort((a, b) => b.tot - a.tot);
+
+  // Star: highest total (must be > 0)
+  const starQa = list.length && list[0].tot > 0 ? list[0].qa : null;
+
+  // Clover: most balanced among those with high total
+  // Requirements: all 3 types > 0, total in top half
+  let cloverQa = null;
+  if (list.length >= 2) {
+    const totals = list.map(x => x.tot).sort((a, b) => b - a);
+    const medianTot = totals[Math.floor(totals.length / 2)] || 0;
+    const eligible = list.filter(x =>
+      x.qas > 0 && x.inj > 0 && x.cmp > 0 && x.tot >= medianTot);
+    if (eligible.length) {
+      eligible.forEach(x => {
+        const arr = [x.qas, x.inj, x.cmp];
+        const mn = Math.min(...arr), mx = Math.max(...arr);
+        x.balance = mn / mx;         // 0..1
+        x.score = x.balance * x.tot; // volume-weighted balance
+      });
+      eligible.sort((a, b) => b.score - a.score);
+      cloverQa = eligible[0].qa;
+    }
+  }
+
+  const totals = { qas: 0, inj: 0, cmp: 0 };
+  let grand = 0;
+  let html = '<table><thead><tr><th class="name">QA Name</th><th>QAS</th><th>Injection</th><th>Compliance</th><th>Total</th></tr></thead><tbody>';
+
+  for (const r of list) {
+    const stars = [];
+    if (r.qa === starQa) stars.push('<span class="marker">⭐</span>');
+    if (r.qa === cloverQa) stars.push('<span class="marker">🍀</span>');
+    html += `<tr class="${r.primary}">
+      <td class="name">${escapeHtml(r.qa)}${stars.join("")}</td>
+      <td class="${r.qas?'hi':'zero'}">${r.qas||'·'}</td>
+      <td class="${r.inj?'hi':'zero'}">${r.inj||'·'}</td>
+      <td class="${r.cmp?'hi':'zero'}">${r.cmp||'·'}</td>
+      <td class="hi">${r.tot}</td>
+    </tr>`;
+    totals.qas += r.qas; totals.inj += r.inj; totals.cmp += r.cmp; grand += r.tot;
+  }
+  html += `<tr class="total"><td class="name">Total</td>
+    <td>${totals.qas||'·'}</td><td>${totals.inj||'·'}</td>
+    <td>${totals.cmp||'·'}</td><td>${grand}</td></tr></tbody></table>`;
+
+  if (tlName) {
+    html = `<div style="font-size:11px; color:#94a3b8; padding:6px 10px; background:#0f172a; border-bottom:1px solid #334155;">
+      Team Leader <b style="color:#fbbf24">${escapeHtml(tlName)}</b> and KFC/Hot Wings QAs excluded
+    </div>` + html;
+  } else {
+    html = `<div style="font-size:11px; color:#94a3b8; padding:6px 10px; background:#0f172a; border-bottom:1px solid #334155;">
+      KFC/Hot Wings QAs excluded
+    </div>` + html;
+  }
+  wrap.innerHTML = html;
+}
+
+function renderCustTable(nonTL) {
+  const wrap = document.getElementById("custTable");
+  // Aggregate: customer → { qas, inj, cmp, tot, products: { productName: { qas, inj, cmp, tot } } }
+  const byCust = {};
+  for (const r of nonTL) {
+    const cust = r.customer || "(no customer)";
+    const c = byCust[cust] = byCust[cust] || { qas: 0, inj: 0, cmp: 0, tot: 0, products: {} };
+    let typeKey = "cmp";
+    if (r.typeCat === "QAS") typeKey = "qas";
+    else if (r.typeCat === "Injection") typeKey = "inj";
+    else if (r.typeCat === "RAG") typeKey = "cmp"; // group RAG under compliance-ish column
+    c[typeKey]++; c.tot++;
+    const prod = r.product || "(no product)";
+    const p = c.products[prod] = c.products[prod] || { qas: 0, inj: 0, cmp: 0, tot: 0 };
+    p[typeKey]++; p.tot++;
+  }
+  const custList = Object.entries(byCust).sort((a, b) => b[1].tot - a[1].tot);
+
+  let html = '<table><thead><tr><th class="name">Customer / Product</th><th>QAS</th><th>Injection</th><th>Compliance</th><th>Total</th></tr></thead><tbody>';
+  const totals = { qas: 0, inj: 0, cmp: 0 }; let grand = 0;
+  for (const [cust, c] of custList) {
+    const open = allExpanded || expandedCustomers.has(cust);
+    html += `<tr class="cust ${open?"open":""}" data-cust="${escapeHtml(cust)}">
+      <td class="name">${escapeHtml(cust)}</td>
+      <td class="${c.qas?'hi':'zero'}">${c.qas||'·'}</td>
+      <td class="${c.inj?'hi':'zero'}">${c.inj||'·'}</td>
+      <td class="${c.cmp?'hi':'zero'}">${c.cmp||'·'}</td>
+      <td class="hi">${c.tot}</td>
+    </tr>`;
+    totals.qas += c.qas; totals.inj += c.inj; totals.cmp += c.cmp; grand += c.tot;
+    const prodList = Object.entries(c.products).sort((a, b) => b[1].tot - a[1].tot);
+    for (const [prod, p] of prodList) {
+      html += `<tr class="prod ${open?"show":""}" data-parent="${escapeHtml(cust)}">
+        <td class="name">${escapeHtml(prod)}</td>
+        <td class="${p.qas?'':'zero'}">${p.qas||'·'}</td>
+        <td class="${p.inj?'':'zero'}">${p.inj||'·'}</td>
+        <td class="${p.cmp?'':'zero'}">${p.cmp||'·'}</td>
+        <td>${p.tot}</td>
+      </tr>`;
+    }
+  }
+  html += `<tr class="total"><td class="name">Total</td>
+    <td>${totals.qas||'·'}</td><td>${totals.inj||'·'}</td>
+    <td>${totals.cmp||'·'}</td><td>${grand}</td></tr></tbody></table>`;
+  wrap.innerHTML = html;
+
+  // Bind row toggles
+  wrap.querySelectorAll("tr.cust").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const cust = tr.dataset.cust;
+      const isOpen = tr.classList.toggle("open");
+      if (isOpen) expandedCustomers.add(cust);
+      else expandedCustomers.delete(cust);
+      wrap.querySelectorAll(`tr.prod[data-parent="${cust.replace(/"/g,'\\"')}"]`).forEach(pr => {
+        pr.classList.toggle("show", isOpen);
+      });
+    });
+  });
+}
+
+function renderFlags(view) {
+  const flagBox = document.getElementById("flagBox");
+  flagBox.innerHTML = "";
+  const unassigned = view.filter(r => r.roomCat === "Unassigned");
+  if (unassigned.length) {
+    const bySheet = {};
+    for (const r of unassigned) bySheet[r.srcSheet] = (bySheet[r.srcSheet] || 0) + 1;
+    const list = Object.entries(bySheet).map(([s, n]) => `${s} (${n})`).join(", ");
+    flagBox.innerHTML = `<div class="flag">⚠️ ${unassigned.length} row(s) unclassified — ${escapeHtml(list)}</div>`;
+  }
+  const noShift = rows.filter(r => !r.shift).length;
+  if (noShift) flagBox.innerHTML += `<div class="flag">ℹ️ ${noShift} row(s) have no shift — hidden.</div>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+// ================= CONTROLS =================
+document.getElementById("shiftBtn").addEventListener("click", () => {
+  currentShift = currentShift === "B" ? "A" : "B";
+  manualTL = null;
+  render();
+});
+document.getElementById("dateSel").addEventListener("change", e => {
+  currentDate = e.target.value;
+  manualTL = null;
+  renderView();
+});
+document.getElementById("expandAllBtn").addEventListener("click", () => {
+  allExpanded = !allExpanded;
+  document.getElementById("expandAllBtn").textContent = allExpanded ? "Collapse all" : "Expand all";
+  renderView();
+});
+</script>
+</body>
+</html>
