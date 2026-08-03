@@ -243,6 +243,89 @@
 
 <script>
 // ================= CONFIG =================
+// Exact product spec weight bands, extracted from Product_List_-_FP1.docx and
+// Product_List_-_FP2_-_2_0.docx. Used to disambiguate QAS Session rows where
+// the Product field is generic ("Whole Bird") but the row also carries a
+// Product Specification min/max weight — which uniquely identifies the exact
+// SKU the QA picked, and therefore the room, even when the product text
+// doesn't say so. This is a much stronger signal than keyword matching.
+// Format: customer (lowercased) -> [{lo, hi, room, name}]
+const PRODUCT_SPECS = {
+  "aldi": [
+    { lo: 1400, hi: 1800, room: "FP1", name: "Medium" },
+    { lo: 1700, hi: 1999, room: "FP1", name: "Large" },
+    { lo: 2000, hi: 2300, room: "FP1", name: "Extra Large" },
+    { lo: 1600, hi: 1900, room: "FP2", name: "Extra Tasty / PSO" },
+    { lo: 1100, hi: 1296, room: "FP2", name: "Spatchcock Garlic and Herb" },
+    { lo: 1100, hi: 1315, room: "FP2", name: "Spatchcock Rotisserie" },
+    { lo: 1150, hi: 1352, room: "FP2", name: "Spatchcock Chinese" },
+  ],
+  "asda": [
+    { lo: 1200, hi: 2500, room: "FP1", name: "Whole Chicken" },
+    { lo: 1450, hi: 1690, room: "FP1", name: "Medium" },
+    { lo: 1700, hi: 1900, room: "FP1", name: "Large" },
+    { lo: 1900, hi: 2300, room: "FP1", name: "Extra Large" },
+    { lo: 1250, hi: 1500, room: "FP2", name: "Extra Tasty Small" },
+    { lo: 1600, hi: 1920, room: "FP2", name: "Extra Tasty Large / PSO" },
+    { lo: 1150, hi: 1300, room: "FP2", name: "Spatchcock Smoky BBQ" },
+    { lo: 1128, hi: 1461, room: "FP2", name: "Spatchcock Lemon and Herb" },
+    { lo: 1160, hi: 1460, room: "FP2", name: "Spatchcock Piri Piri" },
+  ],
+  "iceland": [
+    { lo: 1100, hi: 1300, room: "FP1", name: "Small" },
+    { lo: 1300, hi: 1700, room: "FP1", name: "Medium" }, // NOTE: collides with FP2 band below
+    { lo: 1700, hi: 2200, room: "FP1", name: "Large" },
+    { lo: 1300, hi: 1700, room: "FP2", name: "Extra Tasty Small / PSO" }, // ambiguous with FP1 Medium
+  ],
+  "ocado": [
+    { lo: 1400, hi: 1600, room: "FP1", name: "Medium" },
+    { lo: 1600, hi: 1900, room: "FP1", name: "Large" },
+    { lo: 1900, hi: 2200, room: "FP1", name: "Extra Large" },
+    { lo: 1500, hi: 1800, room: "FP2", name: "Extra Tasty / PSO" },
+    { lo: 1800, hi: 2035, room: "FP2", name: "Garlic and Herb" },
+    { lo: 700, hi: 840, room: "FP2", name: "Salt and Pepper Crown" },
+  ],
+  "coop": [
+    { lo: 1500, hi: 1900, room: "FP1", name: "Large" },
+    { lo: 1910, hi: 2300, room: "FP1", name: "Extra Large" },
+    { lo: 1615, hi: 1831, room: "FP2", name: "Rotisserie" },
+    { lo: 1708, hi: 1953, room: "FP2", name: "PSO" },
+  ],
+  "costco": [
+    { lo: 3400, hi: 4200, room: "FP1", name: "Twin Pack" },
+  ],
+  "ms": [
+    { lo: 1550, hi: 1860, room: "FP2", name: "Rotisserie" },
+    { lo: 2458, hi: 2874, room: "FP2", name: "PSO" },
+    { lo: 1395, hi: 1743, room: "FP2", name: "Garlic and Herb" },
+    { lo: 2294, hi: 2694, room: "FP2", name: "Salt and Pepper BDF" },
+    { lo: 2373, hi: 2758, room: "FP2", name: "Hot Honey BDF" },
+    { lo: 1530, hi: 1680, room: "FP2", name: "Spatchcock Sweet Smokey" },
+    { lo: 490, hi: 579, room: "FP2", name: "Rotisserie joint" },
+    { lo: 452, hi: 506, room: "FP2", name: "Butter Basted joint" },
+  ],
+};
+
+// Match a customer + spec-min/max pair against PRODUCT_SPECS.
+// Returns "FP1", "FP2", "AMBIGUOUS" (matches both), or null (no match).
+function matchProductSpec(customer, specMin, specMax) {
+  if (specMin == null || specMax == null) return null;
+  const custKey = normCustomerKey(customer);
+  const bands = PRODUCT_SPECS[custKey];
+  if (!bands) return null;
+  const matches = bands.filter(b => b.lo === Number(specMin) && b.hi === Number(specMax));
+  if (!matches.length) return null;
+  const rooms = new Set(matches.map(m => m.room));
+  if (rooms.size > 1) return "AMBIGUOUS";
+  return matches[0].room;
+}
+function normCustomerKey(c) {
+  const s = (c || "").trim().toLowerCase();
+  if (s === "m&s" || s === "ms" || s.includes("marks")) return "ms";
+  if (s === "co op" || s === "coop" || s === "co-op") return "coop";
+  return s;
+}
+
 const FP2_KEYWORDS = [
   "extra tasty", "pso", "spatchcock", "rotisserie",
   "garlic and herb", "garlic & herb", "salt and pepper", "s&p",
@@ -308,12 +391,83 @@ function isAldi(product, customer) {
   return /aldi/i.test((customer || "") + " " + (product || ""));
 }
 
-// ================= PRODUCT → ROOM =================
-function classifyProduct(text) {
+// ================= PRODUCT → ROOM (QAS Session tab only) =================
+// This function is ONLY a fallback for the QAS Session tab, which has no
+// Area column. Every other tab's room is determined by the tab/questionnaire
+// itself (see classify() below) — product text is NOT a reliable FP1/FP2
+// signal there, because the same generic "Wholebird" dropdown value gets
+// logged regardless of which room the check actually happened in.
+//
+// Within QAS Session, a product is only classifiable if it carries an
+// explicit flavour/style marker (FP2) or an explicit size/WB code with NO
+// flavour marker (FP1). A bare "Whole Bird" / "Wholebird" with no size and
+// no flavour word is genuinely ambiguous in the source data — don't guess.
+const FP1_SIZE_MARKERS = ["small", "medium", "large", "extra large", "twin pack", " wb"];
+
+// ================= TRACEABILITY SEQUENCE (3rd disambiguation layer) =================
+// The Traceability field encodes a running sequence number across BOTH rooms:
+// seq 1-5 = FP1 (lines 1-5), seq 6-11 = FP2 (lines 1-6, offset by 5).
+// This is Birat's own line-numbering convention: FP2's line count continues
+// on from FP1's, so "L7" = FP2 physical line 2 (7 - 5). It's the strongest
+// signal available because it's independent of what the QA typed as the
+// product name — but the field is entered inconsistently (sometimes just
+// "L1 6212 19:09", sometimes bare "6212" with no sequence at all), and the
+// batch/kill-date code itself is a Julian date (digit=year, 3 digits=day-of-
+// year, e.g. 6212 = 2026, day 212) which can look like a stray sequence
+// number if it gets split by a typo'd space (e.g. "6 212").
+function isJulianCode(tok) {
+  if (!/^\d{4}$/.test(tok)) return false;
+  const doy = parseInt(tok.slice(1), 10);
+  return doy >= 1 && doy <= 366;
+}
+function isTimeToken(tok) {
+  return /^\d{1,2}:\d{2}$/.test(tok);
+}
+function parseTraceSeq(trace) {
+  if (trace == null || trace === "") return null;
+  let tokens = String(trace).trim().split(/\s+/);
+  // Guard against a Julian code accidentally split across two tokens
+  // (e.g. "6 212" is really "6212" mistyped with a space).
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (isJulianCode(tokens[i] + tokens[i + 1])) {
+      tokens = tokens.slice(0, i).concat(tokens.slice(i + 2));
+      break;
+    }
+  }
+  for (const tok of tokens) {
+    const core = tok.replace(/^[Ll]/, "");
+    if (!/^\d+$/.test(core)) continue;
+    if (isTimeToken(tok)) continue;
+    if (isJulianCode(core)) continue;
+    const n = parseInt(core, 10);
+    if (n >= 1 && n <= 11) return n;
+  }
+  return null;
+}
+// Returns "FP1" or "FP2" from a traceability sequence number, or null.
+function roomFromTraceSeq(seq) {
+  if (seq == null) return null;
+  return seq <= 5 ? "FP1" : "FP2";
+}
+
+function classifyProduct(text, customer, specMin, specMax, traceability) {
+  // 1. Traceability sequence number — strongest, product-text-independent signal.
+  const seq = parseTraceSeq(traceability);
+  const traceRoom = roomFromTraceSeq(seq);
+  if (traceRoom) return traceRoom;
+
+  // 2. Exact spec-weight match — works when traceability isn't parseable.
+  const specRoom = matchProductSpec(customer, specMin, specMax);
+  if (specRoom === "FP1" || specRoom === "FP2") return specRoom;
+  // AMBIGUOUS (Iceland 1300-1700 collision) or null falls through to text.
+
+  // 3. Keyword/size text matching — last resort.
   const p = (text || "").toLowerCase();
   if (!p) return null;
   for (const kw of FP2_KEYWORDS) if (p.includes(kw)) return "FP2";
-  return "FP1";
+  const hasSize = FP1_SIZE_MARKERS.some(m => p.includes(m));
+  if (hasSize) return "FP1";
+  return null; // no signal resolved it — genuinely unclassifiable
 }
 
 // ================= ROW CLASSIFICATION =================
@@ -321,6 +475,7 @@ function classify(row) {
   const q = (row.qtype || "").toLowerCase();
   const area = (row.area || "").toUpperCase();
   const text = (row.customer || "") + " " + (row.product || "");
+  const sheet = (row.srcSheet || "").toLowerCase();
 
   // Hot Wings first (before KFC, since sheet names contain "KFC Hot Wings")
   if (q.includes("hot wings")) return { room: "HW", type: "RAG" };
@@ -335,19 +490,22 @@ function classify(row) {
   // Injection → FP2
   if (q.includes("injection")) return { room: "FP2", type: "Injection" };
 
-  // QAS Session
+  // QAS Session — this is the only tab with no dedicated room column, so it
+  // uses the 3-layer disambiguation: traceability sequence, then spec-weight
+  // match, then product-text keyword/size matching.
   if (q.includes("qas session") || q === "qas") {
-    let room = area === "FP1" ? "FP1" : area === "FP2" ? "FP2" : classifyProduct(text);
+    let room = area === "FP1" ? "FP1" : area === "FP2" ? "FP2" :
+      classifyProduct(text, row.customer, row.specMin, row.specMax, row.traceability);
     return { room: room || "Unassigned", type: "QAS" };
   }
 
-  // Compliance audits
+  // Compliance audits — Birat's rule:
+  // Catchweight -> always FP1. Average Weight -> always FP2.
+  // Plain "Compliance Audit" (neither qualifier) -> always FP2.
+  // Injection -> always FP2 (FP1 has no injection concept).
   if (q.includes("catchweight")) return { room: "FP1", type: "Compliance (CW)" };
   if (q.includes("average weight")) return { room: "FP2", type: "Compliance (Avg)" };
-  if (q.includes("compliance")) {
-    let room = area === "FP1" ? "FP1" : area === "FP2" ? "FP2" : classifyProduct(text);
-    return { room: room || "Unassigned", type: "Compliance" };
-  }
+  if (q.includes("compliance")) return { room: "FP2", type: "Compliance" };
 
   return { room: "Unassigned", type: "Other" };
 }
@@ -434,6 +592,9 @@ function parseWorkbook(wb, fname, tag) {
       product: findCol(headers, "Product", "Retail Product Type", "Product:"),
       submitDate: findCol(headers, "Date"),
       checkDate: findCol(headers, "Date.1", "Date:", "Date "),
+      traceability: findCol(headers, "Traceability"),
+      specMin: findCol(headers, "Product Specification minimum weight (g)"),
+      specMax: findCol(headers, "Product specification maximum weight (g)"),
     };
     for (let r = 1; r < data.length; r++) {
       const row = data[r];
@@ -454,6 +615,9 @@ function parseWorkbook(wb, fname, tag) {
         customer: normCustomer(g("customer")),
         product: String(g("product") || "").trim(),
         date: toISODate(dateVal),
+        traceability: g("traceability"),
+        specMin: g("specMin"),
+        specMax: g("specMax"),
         srcSheet: sn,
         uploadTag: tag,
       });
