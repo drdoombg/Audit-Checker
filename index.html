@@ -356,6 +356,22 @@ function normShift(v) {
   if (s.startsWith("B")) return "B";
   return s;
 }
+// Some tabs (Average Weight, Injection) split product identity across two
+// columns: a type field ("Wholebird" vs "Spatchcocks" — whether the bird is
+// still whole-shaped or cut) and a separate Flavour/Size field ("PSO",
+// "Extra Tasty", "Rotisserie"). Neither alone identifies the product — a
+// "Wholebird" row could be any flavour, and "Rotisserie" could in principle
+// apply to more than one type. Other tabs (Catchweight, QAS Session) only
+// have a single combined Product field already carrying both pieces of
+// information (e.g. "Large Extra Tasty CIB WB"). This combines the two
+// fields into one display/matching string when both are present, and
+// otherwise falls back to whichever single field exists.
+function combineProductFlavour(productType, flavourSize) {
+  const pt = String(productType || "").trim();
+  const fs = String(flavourSize || "").trim();
+  if (pt && fs) return `${pt} - ${fs}`;
+  return pt || fs || "";
+}
 function normCustomer(v) {
   if (v == null) return "";
   let s = String(v).trim();
@@ -680,6 +696,7 @@ function parseWorkbook(wb, fname, tag) {
       line: findCol(headers, "Line Number", "Line", "Line:"),
       customer: findCol(headers, "Customer"),
       product: findCol(headers, "Product", "Retail Product Type", "Product:"),
+      flavourSize: findCol(headers, "Flavour / Size", "Flavour/Size", "Flavour / Size ", "Flavour"),
       submitDate: findCol(headers, "Date"),
       checkDate: findCol(headers, "Date.1", "Date:", "Date "),
       timeCol: findCol(headers, "Time", "Time:"),
@@ -706,7 +723,9 @@ function parseWorkbook(wb, fname, tag) {
         auditor: g("auditor") || "",
         qa: normName(g("qa")),
         customer: normCustomer(g("customer")),
-        product: String(g("product") || "").trim(),
+        product: combineProductFlavour(g("product"), g("flavourSize")),
+        productType: String(g("product") || "").trim(),  // raw type only, e.g. "Wholebird" / "Spatchcocks"
+        flavourSize: String(g("flavourSize") || "").trim(),
         date: toISODate(dateVal),
         traceability: g("traceability"),
         specMin: g("specMin"),
