@@ -391,6 +391,29 @@ function isAldi(product, customer) {
   return /aldi/i.test((customer || "") + " " + (product || ""));
 }
 
+// ================= SHIFT TIME-OF-DAY EXTRACTION =================
+// Used to correct mislabeled shift entries (see correctShifts below).
+// Prefers a dedicated Time column; falls back to the time embedded in the
+// check-date timestamp. Returns hours as a decimal (e.g. 14:30 -> 14.5),
+// or null if no time information is available on that row.
+function extractTimeOfDay(timeVal, dateVal) {
+  if (timeVal != null) {
+    if (timeVal instanceof Date) return timeVal.getHours() + timeVal.getMinutes() / 60;
+    const m = String(timeVal).match(/^(\d{1,2}):(\d{2})/);
+    if (m) return parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
+  }
+  if (dateVal != null) {
+    if (dateVal instanceof Date) {
+      const h = dateVal.getHours(), mi = dateVal.getMinutes();
+      if (h !== 0 || mi !== 0) return h + mi / 60;
+    } else {
+      const m = String(dateVal).match(/(\d{1,2}):(\d{2}):(\d{2})/);
+      if (m) return parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
+    }
+  }
+  return null;
+}
+
 // ================= SHIFT LABEL CORRECTION =================
 // Common human error: a QA doing overtime on the opposite shift keeps
 // writing their usual shift letter out of habit. Because the A/B labels
