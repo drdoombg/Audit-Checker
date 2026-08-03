@@ -391,6 +391,64 @@ function isAldi(product, customer) {
   return /aldi/i.test((customer || "") + " " + (product || ""));
 }
 
+// ================= SHIFT LABEL CORRECTION =================
+// Common human error: a QA doing overtime on the opposite shift keeps
+// writing their usual shift letter out of habit. Because the A/B labels
+// swap which one is morning vs afternoon every other week, we can't hardcode
+// "A = morning" — instead, for each date independently, find the natural
+// time gap that splits that day's rows into two clusters, and treat
+// whichever label the majority of each cluster uses as that cluster's true
+// meaning for that date. Any row whose reported label disagrees with its
+// cluster gets corrected for classification purposes (the original report
+// is preserved in shiftReported for transparency).
+function correctShifts(allRows) {
+  const byDate = {};
+  for (const r of allRows) {
+    if (r.timeOfDay == null || !r.shiftReported) continue;
+    const d = r.date || "_nodate";
+    (byDate[d] = byDate[d] || []).push(r);
+  }
+
+  for (const date in byDate) {
+    const dayRows = byDate[date];
+    if (dayRows.length < 4) continue; // too few points to trust a boundary
+
+    // Determine which label is predominantly early vs late by simple mean time.
+    const labels = [...new Set(dayRows.map(r => r.shiftReported))];
+    if (labels.length < 2) continue; // only one shift present, nothing to correct
+
+    const avgTime = {};
+    for (const lab of labels) {
+      const times = dayRows.filter(r => r.shiftReported === lab).map(r => r.timeOfDay);
+      avgTime[lab] = times.reduce((a, b) => a + b, 0) / times.length;
+    }
+    const earlyLabel = labels.reduce((a, b) => avgTime[a] < avgTime[b] ? a : b);
+    const lateLabel = labels.find(l => l !== earlyLabel) || (earlyLabel === "A" ? "B" : "A");
+
+    // Find the best separating boundary between the two clusters using
+    // every observed time as a candidate split point.
+    const sortedTimes = [...new Set(dayRows.map(r => r.timeOfDay))].sort((a, b) => a - b);
+    let boundary = null, bestSep = -1;
+    for (let i = 0; i < sortedTimes.length - 1; i++) {
+      const mid = (sortedTimes[i] + sortedTimes[i + 1]) / 2;
+      const earlyCount = dayRows.filter(r => r.shiftReported === earlyLabel && r.timeOfDay < mid).length +
+                          dayRows.filter(r => r.shiftReported === lateLabel && r.timeOfDay >= mid).length;
+      if (earlyCount > bestSep) { bestSep = earlyCount; boundary = mid; }
+    }
+    if (boundary == null) continue;
+
+    // Apply correction: any row whose time falls on the wrong side of the
+    // boundary for its reported label gets reassigned to the true label.
+    for (const r of dayRows) {
+      const trueLabel = r.timeOfDay < boundary ? earlyLabel : lateLabel;
+      if (trueLabel !== r.shiftReported) {
+        r.shift = trueLabel;
+        r.shiftCorrected = true;
+      }
+    }
+  }
+}
+
 // ================= PRODUCT → ROOM (QAS Session tab only) =================
 // This function is ONLY a fallback for the QAS Session tab, which has no
 // Area column. Every other tab's room is determined by the tab/questionnaire
@@ -592,6 +650,7 @@ function parseWorkbook(wb, fname, tag) {
       product: findCol(headers, "Product", "Retail Product Type", "Product:"),
       submitDate: findCol(headers, "Date"),
       checkDate: findCol(headers, "Date.1", "Date:", "Date "),
+      timeCol: findCol(headers, "Time", "Time:"),
       traceability: findCol(headers, "Traceability"),
       specMin: findCol(headers, "Product Specification minimum weight (g)"),
       specMax: findCol(headers, "Product specification maximum weight (g)"),
@@ -609,7 +668,9 @@ function parseWorkbook(wb, fname, tag) {
         location: g("location") || "",
         area: g("area") || "",
         line: g("line"),
-        shift: normShift(g("shift")),
+        shift: normShift(g("shift")),        // as reported by the QA — may be wrong
+        shiftReported: normShift(g("shift")), // kept for audit/debug reference
+        timeOfDay: extractTimeOfDay(g("timeCol"), dateVal),
         auditor: g("auditor") || "",
         qa: normName(g("qa")),
         customer: normCustomer(g("customer")),
@@ -639,6 +700,8 @@ function render() {
   if (!rows.length) return;
   document.getElementById("empty").classList.add("hidden");
   document.getElementById("content").classList.remove("hidden");
+
+  correctShifts(rows);
 
   rows.forEach(r => {
     const c = classify(r);
@@ -907,6 +970,17 @@ function renderFlags(view) {
   }
   const noShift = rows.filter(r => !r.shift).length;
   if (noShift) flagBox.innerHTML += `<div class="flag">ℹ️ ${noShift} row(s) have no shift — hidden.</div>`;
+
+  const corrected = view.filter(r => r.shiftCorrected);
+  if (corrected.length) {
+    const byQA = {};
+    for (const r of corrected) {
+      const key = `${r.qa} (${r.shiftReported}→${r.shift})`;
+      byQA[key] = (byQA[key] || 0) + 1;
+    }
+    const list = Object.entries(byQA).map(([k, n]) => `${k} ×${n}`).join(", ");
+    flagBox.innerHTML += `<div class="flag">🔄 ${corrected.length} row(s) had a shift label that didn't match their check time — corrected based on the day's actual pattern: ${escapeHtml(list)}</div>`;
+  }
 }
 
 function escapeHtml(s) {
