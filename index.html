@@ -226,8 +226,9 @@
         <div class="metric"><span class="lbl">RAG (9pc + Dark Meat)</span><span class="val" id="kfcRag">0</span></div>
       </div>
       <div class="roomCard hw">
-        <h3>Hot Wings <span class="tot" id="hwTot">0</span></h3>
-        <div class="metric"><span class="lbl">RAG</span><span class="val" id="hwRag">0</span></div>
+        <h3>Hot Wings</h3>
+        <div class="metric"><span class="lbl">Quality RAG</span><span class="val" id="hwQuality">0</span></div>
+        <div class="metric"><span class="lbl">Weight Check</span><span class="val" id="hwWeight">0</span></div>
       </div>
     </div>
 
@@ -558,8 +559,16 @@ function classify(row) {
   const text = (row.customer || "") + " " + (row.product || "");
   const sheet = (row.srcSheet || "").toLowerCase();
 
-  // Hot Wings first (before KFC, since sheet names contain "KFC Hot Wings")
-  if (q.includes("hot wings")) return { room: "HW", type: "RAG" };
+  // Hot Wings — two genuinely different audits, kept separate per Birat:
+  // "KFC Hot Wings Quality - RAG Audit" -> Quality RAG (has fault/RAG scoring)
+  // "KFC Hot Wings Piece and Weight Checks - RAG Audit" -> Weight Check
+  // (despite also saying "RAG Audit" in its name, this is a piece-count/
+  // weight check, not a quality RAG assessment, and must not be merged in)
+  if (q.includes("hot wings")) {
+    if (q.includes("weight")) return { room: "HW", type: "Weight Check" };
+    if (q.includes("quality")) return { room: "HW", type: "Quality RAG" };
+    return { room: "HW", type: "Quality RAG" }; // fallback if wording varies
+  }
 
   // KFC RAG (9 Piece, Dark Meat)
   if (q.includes("kfc") || q.includes("dark meat") ||
@@ -776,7 +785,8 @@ function renderView() {
   const fp2Cmp = nonTL.filter(r => r.roomCat === "FP2" &&
     (r.typeCat === "Compliance (Avg)" || r.typeCat === "Compliance")).length;
   const kfcRag = nonTL.filter(r => r.roomCat === "KFC").length;
-  const hwRag  = nonTL.filter(r => r.roomCat === "HW").length;
+  const hwQuality = nonTL.filter(r => r.roomCat === "HW" && r.typeCat === "Quality RAG").length;
+  const hwWeight  = nonTL.filter(r => r.roomCat === "HW" && r.typeCat === "Weight Check").length;
 
   document.getElementById("fp1Qas").textContent = fp1Qas;
   document.getElementById("fp1Cw").textContent = fp1Cw;
@@ -787,8 +797,8 @@ function renderView() {
   document.getElementById("fp2Tot").textContent = fp2Qas + fp2Inj + fp2Cmp;
   document.getElementById("kfcRag").textContent = kfcRag;
   document.getElementById("kfcTot").textContent = kfcRag;
-  document.getElementById("hwRag").textContent = hwRag;
-  document.getElementById("hwTot").textContent = hwRag;
+  document.getElementById("hwQuality").textContent = hwQuality;
+  document.getElementById("hwWeight").textContent = hwWeight;
 
   renderQATable(nonTL, tl);
   renderCustTable(nonTL);
