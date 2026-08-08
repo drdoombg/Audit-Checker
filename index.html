@@ -309,16 +309,48 @@ const PRODUCT_SPECS = {
 
 // Match a customer + spec-min/max pair against PRODUCT_SPECS.
 // Returns "FP1", "FP2", "AMBIGUOUS" (matches both), or null (no match).
+//
+// Real QA entries sometimes have a slightly wrong min/max (mistyped, or a
+// genuinely different batch tolerance than the doc's reference number) —
+// e.g. an Aldi PSO logged as 1550-1918 when the doc says 1600-1900. Rather
+// than discard the signal entirely on a near-miss, this tries an exact
+// match first, then falls back to the band whose minimum weight is closest
+// (within a small tolerance), since the minimum is the more reliably
+// entered figure in practice. A near-miss across two bands from different
+// rooms is treated as ambiguous, not guessed.
+const SPEC_MATCH_TOLERANCE_G = 75;
+
 function matchProductSpec(customer, specMin, specMax) {
-  if (specMin == null || specMax == null) return null;
+  if (specMin == null) return null;
   const custKey = normCustomerKey(customer);
   const bands = PRODUCT_SPECS[custKey];
   if (!bands) return null;
-  const matches = bands.filter(b => b.lo === Number(specMin) && b.hi === Number(specMax));
-  if (!matches.length) return null;
-  const rooms = new Set(matches.map(m => m.room));
-  if (rooms.size > 1) return "AMBIGUOUS";
-  return matches[0].room;
+  const min = Number(specMin);
+  const max = specMax != null ? Number(specMax) : null;
+
+  // 1. Exact match on both min and max.
+  if (max != null) {
+    const exact = bands.filter(b => b.lo === min && b.hi === max);
+    if (exact.length) {
+      const rooms = new Set(exact.map(m => m.room));
+      return rooms.size > 1 ? "AMBIGUOUS" : exact[0].room;
+    }
+  }
+
+  // 2. Fallback: nearest band by minimum weight, within tolerance.
+  let best = null, bestDist = Infinity;
+  for (const b of bands) {
+    const dist = Math.abs(b.lo - min);
+    if (dist <= SPEC_MATCH_TOLERANCE_G && dist < bestDist) {
+      best = b; bestDist = dist;
+    }
+  }
+  if (!best) return null;
+  // Check for a genuine tie between rooms at similar distance — don't guess.
+  const tied = bands.filter(b => Math.abs(b.lo - min) <= SPEC_MATCH_TOLERANCE_G &&
+    Math.abs(Math.abs(b.lo - min) - bestDist) < 1 && b.room !== best.room);
+  if (tied.length) return "AMBIGUOUS";
+  return best.room;
 }
 function normCustomerKey(c) {
   const s = (c || "").trim().toLowerCase();
@@ -328,10 +360,11 @@ function normCustomerKey(c) {
 }
 
 const FP2_KEYWORDS = [
-  "extra tasty", "pso", "spatchcock", "rotisserie",
+  "extra tasty", "pso", "pork, sage", "pork sage", "pork, sage, onion",
+  "spatchcock", "rotisserie",
   "garlic and herb", "garlic & herb", "salt and pepper", "s&p",
   "bbq", "hot honey", "butter basted", "piri piri", "chinese",
-  "lemon and herb", "smoky", "sweet smokey", "deli", "chilli",
+  "lemon and herb", "smoky", "sweet smokey", "sweet & smoky", "deli", "chilli",
   "sriracha", "jerk", "cajun"
 ];
 
