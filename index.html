@@ -650,6 +650,30 @@ function classify(row) {
 }
 
 // ================= TEAM LEADER =================
+// Given a person's rows for the current view, pick out exactly the ones
+// that represent their Team Leader duty: 2 FP1 QAS + 2 FP2 QAS checks,
+// preferring Aldi ones first (mirrors the auto-detection preference, since
+// TLs are meant to prioritise Aldi when one is running). This matters when
+// a TL also helps out with extra QA work on the same day to pad the team's
+// numbers — that extra work should still count for them individually; only
+// their 4 mandatory TL checks come out of the room/individual totals.
+function splitTLDuty(personRows) {
+  const fp1Qas = personRows.filter(r => r.roomCat === "FP1" && r.typeCat === "QAS");
+  const fp2Qas = personRows.filter(r => r.roomCat === "FP2" && r.typeCat === "QAS");
+
+  const pickTwo = (list) => {
+    const aldi = list.filter(r => isAldi(r.product, r.customer));
+    const rest = list.filter(r => !isAldi(r.product, r.customer));
+    return [...aldi, ...rest].slice(0, 2);
+  };
+
+  const tlFp1 = pickTwo(fp1Qas);
+  const tlFp2 = pickTwo(fp2Qas);
+  const tlAudits = [...tlFp1, ...tlFp2];
+  const tlRowRefs = new Set(tlAudits.map(r => r.ref));
+  return { tlRowRefs, tlAudits, complete: tlFp1.length === 2 && tlFp2.length === 2 };
+}
+
 function detectTeamLeader(dayRows) {
   const byQA = {};
   for (const r of dayRows) {
@@ -823,11 +847,30 @@ function renderView() {
 
   const candidates = detectTeamLeader(view);
   let tl = null;
-  if (manualTL && view.some(r => r.qa === manualTL)) tl = manualTL;
+  let isManualOverride = false;
+  if (manualTL && view.some(r => r.qa === manualTL)) {
+    tl = manualTL;
+    isManualOverride = true;
+  }
   if (!tl && candidates.length) tl = candidates[0].qa;
+  if (tl && candidates.length && candidates[0].qa === tl) isManualOverride = false;
   renderTL(tl, candidates, view);
 
-  const nonTL = tl ? view.filter(r => r.qa !== tl) : view;
+  let nonTL;
+  if (!tl) {
+    nonTL = view;
+  } else if (!isManualOverride) {
+    // Auto-detected TL: by construction they have exactly 4 QAS checks and
+    // nothing else, so excluding all their rows is correct.
+    nonTL = view.filter(r => r.qa !== tl);
+  } else {
+    // Manually-set TL: they may have extra QA/Injection/Compliance work
+    // beyond their 4 TL duty checks (helping out to boost team numbers).
+    // Only pull out the 4 duty rows; keep the rest attributed to them.
+    const personRows = view.filter(r => r.qa === tl);
+    const { tlRowRefs } = splitTLDuty(personRows);
+    nonTL = view.filter(r => !(r.qa === tl && tlRowRefs.has(r.ref)));
+  }
 
   // Room metrics
   const fp1Qas = nonTL.filter(r => r.roomCat === "FP1" && r.typeCat === "QAS").length;
@@ -871,14 +914,27 @@ function renderTL(tl, candidates, view) {
     const aldiFP2 = tlRows.some(r => r.roomCat === "FP2" && isAldi(r.product, r.customer));
     const aldiTag = (aldiFP1 && aldiFP2) ? "· ✓ Aldi both rooms"
       : (aldiFP1 || aldiFP2) ? "· ⚠ Aldi in one room only" : "· ✗ no Aldi";
-    const tag = manualTL === tl ? "manual"
-      : candidates[0] && candidates[0].qa === tl ? "auto-detected" : "override";
+    const isAuto = candidates[0] && candidates[0].qa === tl;
+    const tag = manualTL === tl ? "manual" : isAuto ? "auto-detected" : "override";
+
+    let extraNote = "";
+    if (manualTL === tl && !isAuto) {
+      const { tlAudits, complete } = splitTLDuty(tlRows);
+      const extraCount = tlRows.length - tlAudits.length;
+      if (extraCount > 0) {
+        extraNote = `<div class="stats" style="color:#4ade80;">+ ${extraCount} extra check(s) done as regular QA — kept in their individual totals</div>`;
+      }
+      if (!complete) {
+        extraNote += `<div class="stats" style="color:#f87171;">⚠ Doesn't have a full 2 FP1 + 2 FP2 QAS set — duty-check split may be incomplete</div>`;
+      }
+    }
 
     box.classList.remove("none");
     box.innerHTML = `
       <div class="lbl">Team Leader · ${tag}</div>
       <div class="name">${escapeHtml(tl)}</div>
       <div class="stats">FP1: ${fp1n} · FP2: ${fp2n}${other?` · Other: ${other}`:""} ${aldiTag}</div>
+      ${extraNote}
       <div class="changeBar">
         <select id="tlSel">${selOpts}</select>
         <button class="btn" id="tlSet">Set</button>
